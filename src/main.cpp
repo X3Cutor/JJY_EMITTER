@@ -3,28 +3,18 @@
 #include <WiFi.h>
 #include <WiFiClient.h>
 
-#include "../../.ssid.h"
-/*
-// あるいは、以下のような感じで設定を書いてください
+#include "config.h"
 
-const char* ssid = "SSID"; // アクセスポイントのSSID
-const char* password = "password"; // アクセスポイントのパスワード
-const char* tz = "JST-9"; // タイムゾーン
-const char* ntp[] = {"0.pool.ntp.org", "1.pool.ntp.org", "2.pool.ntp.org"}; // NTPサーバー
+#define JJY_40k_OUTPUT_PIN 21 // Pin that outputs 40kHz code (-1 = not used)
+#define JJY_60k_OUTPUT_PIN -1 // Pin that outputs 60kHz code (-1 = not used)
+#define JJY_CODE_NONINVERTED_OUTPUT_PIN -1  // Pin that outputs unmodulated timecode in positive logic (-1 = not used)
+#define JJY_CODE_INVERTED_OUTPUT_PIN -1 // Pin that outputs unmodulated timecode in negative logic (-1 = not used)
 
+#define LEDC_40k_CHANNEL 0	   // LEDC 40kHz channel
+#define LEDC_60k_CHANNEL 10	   // LEDC 60kHz channel
+#define LEDC_RESOLUTION_BITS 1 // LEDC Resolution
 
-*/
-
-#define JJY_40k_OUTPUT_PIN 23 // 40kHzコードを出力するピン(-1 = 使わない場合)
-#define JJY_60k_OUTPUT_PIN 22 // 60kHzコードを出力するピン(-1 = 使わない場合)
-#define JJY_CODE_NONINVERTED_OUTPUT_PIN 2  // 無変調のタイムコードを正論理で出力するピン(-1 = 使わない場合)
-#define JJY_CODE_INVERTED_OUTPUT_PIN 15 // 無変調のタイムコードを負論理で出力するピン(-1 = 使わない場合)
-
-#define LEDC_40k_CHANNEL 0	   // LEDCの40kHz用チャネル
-#define LEDC_60k_CHANNEL 10	   // LEDCの60kHz用チャネル
-#define LEDC_RESOLUTION_BITS 1 // LEDCの解像度
-
-// タイムコードを作成するクラス
+// Class to create timecode
 class jjy_timecode_generator_t
 {
 public:
@@ -374,10 +364,10 @@ void loop()
 	t = time(&t);
 	struct tm *tm = localtime(&t);
 	bool date_valid = true;
-	if(tm->tm_year + 1900 < 2000) date_valid = false; // おそらくまだ NTPの取得ができていない
+	if(tm->tm_year + 1900 < 2000) date_valid = false; // Probably NTP has not been acquired yet.
 	if (last_min != tm->tm_min && tm->tm_sec == 0)
 	{
-		// 分の変わり目。1分ぶんのタイムコードを作成する。
+		// The change of minutes. Creates a one-minute time code.
 		gen.year10 = (tm->tm_year / 10) % 10;
 		gen.year1 = tm->tm_year % 10;
 		gen.yday100 = ((tm->tm_yday + 1) / 100) % 10;
@@ -409,12 +399,12 @@ void loop()
 	}
 	last_min = tm->tm_min;
 
-	// 各秒ごとにお仕事
+	// A job every second
 	uint32_t sub_min = millis() - min_origin_tick;
 	int sec = sub_min / 1000;
 	int sub_sec = sub_min % 1000;
 	bool on = false;
-	if (sec < 60) // sec が 60 のときがあるけどとりあえず無視
+	if (sec < 60) // Sometimes sec is 60, but ignore it for now.
 	{
 		switch (gen.result[sec])
 		{
@@ -438,13 +428,13 @@ void loop()
 			last_on_state = on;
 			if(date_valid && gen.valid)
 			{
-				// 正常に時刻を取得できている場合のみに出力を行う
+				// Output only if the time is obtained correctly.
 				if (on)
 				{
 					if (JJY_60k_OUTPUT_PIN != -1)
-						ledcWrite(LEDC_60k_CHANNEL, (1 << LEDC_RESOLUTION_BITS) / 2); // ディユーティー比 = 50%
+						ledcWrite(LEDC_60k_CHANNEL, (1 << LEDC_RESOLUTION_BITS) / 2); // Duty ratio = 50%
 					if (JJY_40k_OUTPUT_PIN != -1)
-						ledcWrite(LEDC_40k_CHANNEL, (1 << LEDC_RESOLUTION_BITS) / 2); // ディユーティー比 = 50%
+						ledcWrite(LEDC_40k_CHANNEL, (1 << LEDC_RESOLUTION_BITS) / 2); // Duty ratio = 50%
 					if (JJY_CODE_NONINVERTED_OUTPUT_PIN != -1)
 						digitalWrite(JJY_CODE_NONINVERTED_OUTPUT_PIN, 1);
 					if (JJY_CODE_INVERTED_OUTPUT_PIN != -1)
@@ -453,9 +443,9 @@ void loop()
 				else
 				{
 					if (JJY_60k_OUTPUT_PIN != -1)
-						ledcWrite(LEDC_60k_CHANNEL, 0); // ディユーティー比 0 = OFF
+						ledcWrite(LEDC_60k_CHANNEL, 0); // Duty ratio 0 = OFF
 					if (JJY_40k_OUTPUT_PIN != -1)
-						ledcWrite(LEDC_40k_CHANNEL, 0); // ディユーティー比 0 = OFF
+						ledcWrite(LEDC_40k_CHANNEL, 0); // Duty ratio 0 = OFF
 					if (JJY_CODE_NONINVERTED_OUTPUT_PIN != -1)
 						digitalWrite(JJY_CODE_NONINVERTED_OUTPUT_PIN, 0);
 					if (JJY_CODE_INVERTED_OUTPUT_PIN != -1)
@@ -464,5 +454,5 @@ void loop()
 			}
 		}
 	}
-	vTaskDelay(5); // 適当な tick 分寝る
+	vTaskDelay(5); // Sleep for the appropriate number of ticks
 }
