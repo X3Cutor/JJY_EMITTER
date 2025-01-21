@@ -5,14 +5,14 @@
 
 #include "config.h"
 
-#define JJY_40k_OUTPUT_PIN 21 // Pin that outputs 40kHz code (-1 = not used)
-#define JJY_60k_OUTPUT_PIN -1 // Pin that outputs 60kHz code (-1 = not used)
-#define JJY_CODE_NONINVERTED_OUTPUT_PIN -1  // Pin that outputs unmodulated timecode in positive logic (-1 = not used)
-#define JJY_CODE_INVERTED_OUTPUT_PIN -1 // Pin that outputs unmodulated timecode in negative logic (-1 = not used)
+#define JJY_40k_OUTPUT_PIN 21			   // Pin that outputs 40kHz code (-1 = not used)
+#define JJY_60k_OUTPUT_PIN -1			   // Pin that outputs 60kHz code (-1 = not used)
+#define JJY_CODE_NONINVERTED_OUTPUT_PIN -1 // Pin that outputs unmodulated timecode in positive logic (-1 = not used)
+#define JJY_CODE_INVERTED_OUTPUT_PIN -1	   // Pin that outputs unmodulated timecode in negative logic (-1 = not used)
 
-#define LEDC_40k_CHANNEL 0	   // LEDC 40kHz channel
-#define LEDC_60k_CHANNEL 10	   // LEDC 60kHz channel
-#define LEDC_RESOLUTION_BITS 1 // LEDC Resolution
+#define LEDC_40k_CHANNEL LEDC_CHANNEL_0		  // LEDC 40kHz channel
+#define LEDC_60k_CHANNEL LEDC_CHANNEL_1		  // LEDC 60kHz channel
+#define LEDC_RESOLUTION_BITS LEDC_TIMER_1_BIT // LEDC Resolution
 
 // Class to create timecode
 class jjy_timecode_generator_t
@@ -312,7 +312,10 @@ public:
 
 static void start_wifi()
 {
+	Serial.print("Attempting to connect to network with SSID: ");
+	Serial.println(ssid);
 
+	WiFi.setHostname(hostname);
 	WiFi.mode(WIFI_OFF);
 	WiFi.setAutoReconnect(true);
 	WiFi.mode(WIFI_STA);
@@ -326,27 +329,25 @@ static void start_wifi()
 		Serial.printf(".");
 		delay(1000);
 	}
+	IPAddress ip = WiFi.localIP();
+	Serial.printf("IP Address: ");
+	Serial.println(ip);
 	configTzTime(tz, ntp[0], ntp[1], ntp[2]);
-
 }
 
 void setup()
 {
 	Serial.begin(115200);
+	Serial.println("Starting setup");
 
 	start_wifi();
 
+	ledcSetClockSource(LEDC_AUTO_CLK);
 	if (JJY_60k_OUTPUT_PIN != -1)
-	{
-		ledcSetup(LEDC_60k_CHANNEL, 60000.0, LEDC_RESOLUTION_BITS);
-		ledcAttachPin(JJY_60k_OUTPUT_PIN, LEDC_60k_CHANNEL);
-	}
+		ledcAttachChannel(JJY_60k_OUTPUT_PIN, 60000, LEDC_RESOLUTION_BITS, LEDC_60k_CHANNEL);
 
 	if (JJY_40k_OUTPUT_PIN != -1)
-	{
-		ledcSetup(LEDC_40k_CHANNEL, 40000.0, LEDC_RESOLUTION_BITS);
-		ledcAttachPin(JJY_40k_OUTPUT_PIN, LEDC_40k_CHANNEL);
-	}
+		ledcAttachChannel(JJY_40k_OUTPUT_PIN, 40000, LEDC_RESOLUTION_BITS, LEDC_40k_CHANNEL);
 
 	if (JJY_CODE_NONINVERTED_OUTPUT_PIN != -1)
 		pinMode(JJY_CODE_NONINVERTED_OUTPUT_PIN, OUTPUT);
@@ -364,7 +365,8 @@ void loop()
 	t = time(&t);
 	struct tm *tm = localtime(&t);
 	bool date_valid = true;
-	if(tm->tm_year + 1900 < 2000) date_valid = false; // Probably NTP has not been acquired yet.
+	if (tm->tm_year + 1900 < 2000)
+		date_valid = false; // Probably NTP has not been acquired yet.
 	if (last_min != tm->tm_min && tm->tm_sec == 0)
 	{
 		// The change of minutes. Creates a one-minute time code.
@@ -426,15 +428,15 @@ void loop()
 		if (on != last_on_state)
 		{
 			last_on_state = on;
-			if(date_valid && gen.valid)
+			if (date_valid && gen.valid)
 			{
 				// Output only if the time is obtained correctly.
 				if (on)
 				{
 					if (JJY_60k_OUTPUT_PIN != -1)
-						ledcWrite(LEDC_60k_CHANNEL, (1 << LEDC_RESOLUTION_BITS) / 2); // Duty ratio = 50%
+						ledcWriteChannel(LEDC_60k_CHANNEL, (1 << LEDC_RESOLUTION_BITS) / 2); // Duty ratio = 50%
 					if (JJY_40k_OUTPUT_PIN != -1)
-						ledcWrite(LEDC_40k_CHANNEL, (1 << LEDC_RESOLUTION_BITS) / 2); // Duty ratio = 50%
+						ledcWriteChannel(LEDC_40k_CHANNEL, (1 << LEDC_RESOLUTION_BITS) / 2); // Duty ratio = 50%
 					if (JJY_CODE_NONINVERTED_OUTPUT_PIN != -1)
 						digitalWrite(JJY_CODE_NONINVERTED_OUTPUT_PIN, 1);
 					if (JJY_CODE_INVERTED_OUTPUT_PIN != -1)
@@ -443,9 +445,9 @@ void loop()
 				else
 				{
 					if (JJY_60k_OUTPUT_PIN != -1)
-						ledcWrite(LEDC_60k_CHANNEL, 0); // Duty ratio 0 = OFF
+						ledcWriteChannel(LEDC_60k_CHANNEL, 0); // Duty ratio 0 = OFF
 					if (JJY_40k_OUTPUT_PIN != -1)
-						ledcWrite(LEDC_40k_CHANNEL, 0); // Duty ratio 0 = OFF
+						ledcWriteChannel(LEDC_40k_CHANNEL, 0); // Duty ratio 0 = OFF
 					if (JJY_CODE_NONINVERTED_OUTPUT_PIN != -1)
 						digitalWrite(JJY_CODE_NONINVERTED_OUTPUT_PIN, 0);
 					if (JJY_CODE_INVERTED_OUTPUT_PIN != -1)
