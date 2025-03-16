@@ -2,6 +2,9 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <ESPmDNS.h>
+#include <NetworkUdp.h>
+#include <ArduinoOTA.h>
 
 #include "config.h"
 
@@ -13,6 +16,9 @@
 #define LEDC_40k_CHANNEL LEDC_CHANNEL_0		  // LEDC 40kHz channel
 #define LEDC_60k_CHANNEL LEDC_CHANNEL_1		  // LEDC 60kHz channel
 #define LEDC_RESOLUTION_BITS LEDC_TIMER_1_BIT // LEDC Resolution
+
+unsigned long startMillis;
+boolean firstBoot = true;
 
 // Class to create timecode
 class jjy_timecode_generator_t
@@ -335,6 +341,51 @@ static void start_wifi()
 	configTzTime(tz, ntp[0], ntp[1], ntp[2]);
 }
 
+void setupOTA() {
+	// Port defaults to 3232
+	// ArduinoOTA.setPort(3232);
+
+	// No authentication by default
+	// ArduinoOTA.setPassword("admin");
+
+	// Password can be set with it's md5 value as well
+	// MD5(admin) = 21232f297a57a5a743894a0e4a801fc3
+	// ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3");
+	ArduinoOTA.onStart([]() {
+      String type;
+      if (ArduinoOTA.getCommand() == U_FLASH) {
+        type = "sketch";
+      } else {  // U_SPIFFS
+        type = "filesystem";
+      }
+
+      // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+      Serial.println("Start updating " + type);
+    })
+    .onEnd([]() {
+      Serial.println("\nEnd");
+    })
+    .onProgress([](unsigned int progress, unsigned int total) {
+      Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    })
+    .onError([](ota_error_t error) {
+      Serial.printf("Error[%u]: ", error);
+      if (error == OTA_AUTH_ERROR) {
+		Serial.println("Auth Failed");
+      } else if (error == OTA_BEGIN_ERROR) {
+        Serial.println("Begin Failed");
+      } else if (error == OTA_CONNECT_ERROR) {
+        Serial.println("Connect Failed");
+      } else if (error == OTA_RECEIVE_ERROR) {
+        Serial.println("Receive Failed");
+      } else if (error == OTA_END_ERROR) {
+        Serial.println("End Failed");
+      }
+    });
+
+  	ArduinoOTA.begin();
+}
+
 void setup()
 {
 	Serial.begin(115200);
@@ -354,6 +405,18 @@ void setup()
 
 	if (JJY_CODE_INVERTED_OUTPUT_PIN != -1)
 		pinMode(JJY_CODE_INVERTED_OUTPUT_PIN, OUTPUT);
+	
+	setupOTA();
+	startMillis = millis();
+	Serial.println("Setup complete");
+
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
+        Serial.println("First boot or reset detected!");
+		firstBoot = true;
+    } else {
+        Serial.println("Woke up from deep sleep!");
+		firstBoot = false;
+    }
 }
 
 void loop()
@@ -364,6 +427,21 @@ void loop()
 	time_t t;
 	t = time(&t);
 	struct tm *tm = localtime(&t);
+
+	#if LIMIT_HOURS
+	const unsigned long elapsedMinutes = (millis() - startMillis) / (60 * 1000);
+	const int currentHour = tm->tm_hour;
+
+	if ( !(elapsedMinutes < 60 && firstBoot) && !(hourMin <= currentHour && currentHour < hourMax) ) {	
+		const unsigned long sleepMinutes = max(60UL - tm->tm_min, 1UL);
+		if (!(currentHour + 1 == hourMin && sleepMinutes < 5)) {
+			Serial.printf("Sleeping %dm\n", sleepMinutes);
+			delay(500);
+			esp_deep_sleep(sleepMinutes * (60ULL * 1000 * 1000));
+		}
+	}
+	#endif
+
 	bool date_valid = true;
 	if (tm->tm_year + 1900 < 2000)
 		date_valid = false; // Probably NTP has not been acquired yet.
@@ -386,7 +464,7 @@ void loop()
 		gen.generate();
 		min_origin_tick = millis();
 
-		Serial.printf("%d%d/%d/%d (%d%d%d) %d%d:%d%d\r\n",
+		Serial.printf("%d%d-%d-%d (%d%d%d) %d%d:%d%d\r\n",
 					  gen.year10,
 					  gen.year1,
 					  gen.mon + 1,
@@ -457,4 +535,6 @@ void loop()
 		}
 	}
 	vTaskDelay(5); // Sleep for the appropriate number of ticks
+
+	ArduinoOTA.handle();
 }
